@@ -1,0 +1,224 @@
+  <!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sale Bill Generator</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    body { font-family: 'Segoe UI', sans-serif; padding: 20px; background: linear-gradient(to right, #e0f7fa, #fff); }
+    h1, h2 { text-align: center; color: #00796b; }
+    label { font-weight: bold; color: #004d40; }
+    input, button, datalist, select { padding: 8px; margin: 5px; border: 1px solid #ccc; border-radius: 5px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+    th, td { border: 1px solid #ccc; padding: 10px; text-align: center; }
+    th { background: #b2dfdb; }
+    button { background: #00796b; color: white; cursor: pointer; transition: background 0.3s; }
+    button:hover { background: #004d40; }
+    #recordsSection { margin-top: 40px; }
+  </style>
+</head>
+<body>
+  <h1>Sale Bill Generator</h1>
+  <div>
+    <label for="calendar">Date:</label>
+    <input type="date" id="calendar">
+  </div>
+  <div>
+    <label for="vendor">Vendor:</label>
+    <input list="vendorList" id="vendorInput" placeholder="Select or add vendor">
+    <datalist id="vendorList"></datalist>
+    <button id="addVendorBtn">Add Vendor</button>
+  </div>
+  <datalist id="itemList"></datalist>
+  <table>
+    <thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th><th>Action</th></tr></thead>
+    <tbody id="itemsBody"></tbody>
+  </table>
+  <button id="addItemBtn">Add Item</button>
+  <h3>Grand Total: ₹<span id="grandTotal">0.00</span></h3>
+  <button id="exportPdfBtn">Export to PDF</button>
+  <button id="saveRecordBtn">Save Record</button>
+
+  <div id="recordsSection">
+    <h2>View Past Bills</h2>
+    <label for="filterDate">Filter by Date:</label>
+    <input type="date" id="filterDate">
+    <label for="filterVendor">Vendor:</label>
+    <input list="vendorList" id="filterVendor" placeholder="Filter by vendor">
+    <button id="filterBtn">Show Records</button>
+    <button id="exportRecordPdf">Export Filtered PDF</button>
+    <button id="exportRecordExcel">Export Filtered Excel</button>
+    <table>
+      <thead><tr><th>Date</th><th>Vendor</th><th>Total</th><th>View</th></tr></thead>
+      <tbody id="recordsBody"></tbody>
+    </table>
+  </div>
+
+  <script>
+    const STORAGE_VENDOR = 'salebill_vendors';
+    const STORAGE_RECORDS = 'salebill_records';
+    const EXPIRY_MS = 10 * 24 * 60 * 60 * 1000;
+
+    let vendors = [
+      "GURUKRIPA EXOTIC VEGETABLE","Hari Nasik","MOHIT MUNDHRA A/C 1578","Nashik Hari","SUSPENSE","Fruit","Ahmed Bunty & Co",
+      "Ajay Kalluramji Verma","Anil Fruit Co","Ashfak Mohammad umar & co.","Ashfaq Mohhamad & Co","Ashish Kailash Chouhan & Co.",
+      "ASHISH MANJHE","Ashok Kumar Balumal","Bhimsingh Bhagirathji Nekie","Chanda International","Jai Ganesh Kela Supplier",
+      "Jai Kumar","Kewalram Narayan Das","Lakshya Fruit Co.","Manju Pawar","NARENDRA KUMAR & CO","NARENDRA KUMAR GERANI (BBS )",
+      "Pappu Kanhaiyalal Verma","Prateek Enterprises","Rajesh Kumar & Co","Rakesh Kumar Sharma","sateesh manjhe",
+      "Suraj Bansi & Co","TARUN KUMAR RAHUL KUMAR","Tikamdas Gordhan Das","Usmangani Abdulsattar","Yashwant Birla",
+      "Akash Bhaiya","Akash Bhaiya Khet","Anil MUKATI","Ashish 3No.","Babu Banti","KAHANA MUKATI","Lokesh Kumar Vijendra Kumar",
+      "Ravi Kampel","Salman Bhaiya","teja bhaiya","Teja Hemlata","Agra Kisan Agro Society","Ankit Road Lines",
+      "Jaspal Chapda","Patidar Trading Co","Pop Singh","Shri Achalnath Agro Corp","AANAND CHOUAN","Akash Kushmakar",
+      "Amar Dilip Bhaiya","Amar dilip virahe","Anil Jaat","Banti Satan","Bhawesh Patidar","Birja 149 no shop","Birja Bhaiya",
+      "Biru Bhaiya 149 no","Braj raj Gurjar","Charan Mama","Deva Bhaiya","Ganesh kumariya","Imran Mohammad","Jitu Bhaiya",
+      "Jitu viru Aman","Kunal Traders","Manish 143","Nanhe Bhai Shehjad Bhai","Shubham Patidar","Sonu Panchal","Sudhir Bhaiya"
+    ];
+
+    let records = JSON.parse(localStorage.getItem(STORAGE_RECORDS) || '[]');
+    function saveRecords() { localStorage.setItem(STORAGE_RECORDS, JSON.stringify(records)); }
+    function cleanupRecords() {
+      const now = Date.now();
+      records = records.filter(r => now - r.timestamp < EXPIRY_MS);
+      saveRecords();
+    }
+
+    function populateVendorList() {
+      const dl = document.getElementById('vendorList');
+      dl.innerHTML = '';
+      vendors.forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v;
+        dl.appendChild(opt);
+      });
+    }
+
+    const items = [
+      "Apple Fuji","Baby Banana","Basil (Cleaned, No Roots)","Broccoli","Button Mushroom","Carrot","Chikoo (Sapota)",
+      "Coconut Chunks","Coriander Leaves","Curry Leaves","Daily Apple","Daily Juice Sweet Lime",
+      "Diced Muskmelon (Kharbooja)","Diced Papaya","English Cucumber","Fruit Chat Mix","Garlic","Ginger","Green Kiwi",
+      "Hybrid Tomato","Imported Avocado","Imported Blueberry","Imported Red Globe Grapes","Kiran Watermelon",
+      "Lady Red Papaya","Lady's Finger","Lettuce Green","Lettuce Iceberg","Mandarin Orange","Mango Banganpalli",
+      "Mango Lalbagh Sindhura","Muskmelon","Fenugreek","Spinach","Orange Malta","Papaya","Peeled Pomegranate",
+      "Green Chilli","Pineapple","Pineapple Chunks","Pineapple Whole","Pineapple Slices","Pomegranate","Potato",
+      "Raw Banana","Raw Mango","Red Bell Pepper","Red Delicious Apple","Red Watermelon Slice","Robusta Banana",
+      "Royal Gala Apple","Cauliflower","Green Capsicum","Sweet Lime","Tender Coconut","Thai Guava","Vari Brinjal"
+    ];
+
+    function populateItemList() {
+      const dl = document.getElementById('itemList');
+      dl.innerHTML = '';
+      items.forEach(i => { const opt = document.createElement('option'); opt.value = i; dl.appendChild(opt); });
+    }
+
+    function addItemRow() {
+      const tbody = document.getElementById('itemsBody');
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input list="itemList" class="itemInput" placeholder="Item"></td>
+        <td><input type="number" class="qty" value="0"></td>
+        <td><input type="number" class="rate" value="0"></td>
+        <td><span class="total">0.00</span></td>
+        <td><button class="removeBtn">🗑️</button></td>`;
+      tbody.appendChild(tr);
+      tr.querySelector('.qty').addEventListener('input', calculate);
+      tr.querySelector('.rate').addEventListener('input', calculate);
+      tr.querySelector('.removeBtn').addEventListener('click', () => { tr.remove(); calculate(); });
+    }
+
+    function calculate() {
+      let sum = 0;
+      document.querySelectorAll('#itemsBody tr').forEach(r => {
+        const q = +r.querySelector('.qty').value;
+        const rt = +r.querySelector('.rate').value;
+        const total = q * rt;
+        r.querySelector('.total').textContent = total.toFixed(2);
+        sum += total;
+      });
+      document.getElementById('grandTotal').textContent = sum.toFixed(2);
+    }
+
+    function saveCurrentRecord() {
+        const vendor = document.getElementById('vendorInput').value || 'Unknown';
+        const date = document.getElementById('calendar').value || new Date().toLocaleDateString();
+
+        const itemsData = [];
+        let total = 0;
+        document.querySelectorAll('#itemsBody tr').forEach(r => {
+            const item = r.querySelector('.itemInput').value;
+            const qty = parseInt(r.querySelector('.qty').value);
+            const rate = parseFloat(r.querySelector('.rate').value);
+            const itemTotal = qty * rate;
+            total += itemTotal;
+            itemsData.push({ item, qty, rate, total: itemTotal.toFixed(2) });
+        });
+
+        fetch('/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ vendor, date, items: itemsData, total: total.toFixed(2) })
+        })
+        .then(response => response.json())
+        .then(data => alert(data.message))
+        .catch(error => console.error('Error:', error));
+    }
+
+
+    function exportRecordsToPdf(filtered) {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      doc.setFontSize(16);
+      doc.text('Filtered Sale Records', 10, 10);
+      const body = filtered.map(r => [r.date, r.vendor, r.total]);
+      doc.autoTable({ head: [['Date', 'Vendor', 'Total']], body, startY: 20 });
+      doc.save(`Filtered_Records_${Date.now()}.pdf`);
+    }
+
+    function exportRecordsToExcel(filtered) {
+      const ws = XLSX.utils.json_to_sheet(filtered.map(r => ({ Date: r.date, Vendor: r.vendor, Total: r.total })));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'FilteredRecords');
+      XLSX.writeFile(wb, `Filtered_Records_${Date.now()}.xlsx`);
+    }
+
+    function showRecords() {
+      const date = document.getElementById('filterDate').value;
+      const vendor = document.getElementById('filterVendor').value.trim();
+      const tbody = document.getElementById('recordsBody');
+      tbody.innerHTML = '';
+      const filtered = records.filter(r => (!date || r.date === date) && (!vendor || r.vendor === vendor));
+      filtered.forEach(r => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${r.date}</td>
+          <td>${r.vendor}</td>
+          <td>₹${r.total}</td>
+          <td><button class="viewBtn">View</button></td>`;
+        tr.querySelector('.viewBtn').addEventListener('click', () => {
+          let msg = `Vendor: ${r.vendor}\nDate: ${r.date}\nTotal: ₹${r.total}`;
+          r.items.forEach(i => msg += `\n${i.item} - Q:${i.qty} R:${i.rate} T:${i.total}`);
+          alert(msg);
+        });
+        tbody.appendChild(tr);
+      });
+      return filtered;
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      cleanupRecords();
+      populateVendorList();
+      populateItemList();
+      addItemRow();
+      document.getElementById('addItemBtn').addEventListener('click', addItemRow);
+      document.getElementById('addVendorBtn').addEventListener('click', saveCurrentRecord);
+      document.getElementById('saveRecordBtn').addEventListener('click', saveCurrentRecord);
+      document.getElementById('exportPdfBtn').addEventListener('click', () => { saveCurrentRecord(); exportRecordsToPdf([records[records.length - 1]]); });
+      document.getElementById('filterBtn').addEventListener('click', showRecords);
+      document.getElementById('exportRecordPdf').addEventListener('click', () => exportRecordsToPdf(showRecords()));
+      document.getElementById('exportRecordExcel').addEventListener('click', () => exportRecordsToExcel(showRecords()));
+    });
+  </script>
+</body>
+</html>
